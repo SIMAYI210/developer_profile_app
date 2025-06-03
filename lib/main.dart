@@ -146,6 +146,14 @@ class _GameScreenState extends State<GameScreen>
   int timeSlowCooldown = 0;
   int invincibleCooldown = 0;
   int megaBlastCooldown = 0;
+  bool shieldActive = false;
+  int shieldCooldown = 0;
+  int shieldDuration = 0;
+
+  int comboCount = 0;
+  int comboTimer = 0;
+
+  final ParticlePool particlePool = ParticlePool();
   
   // 游戏对象
   Player player = Player();
@@ -300,6 +308,11 @@ class _GameScreenState extends State<GameScreen>
       timeSlowCooldown = 0;
       invincibleCooldown = 0;
       megaBlastCooldown = 0;
+      shieldActive = false;
+      shieldCooldown = 0;
+      shieldDuration = 0;
+      comboCount = 0;
+      comboTimer = 0;
       enemies.clear();
       bullets.clear();
       enemyBullets.clear();
@@ -373,7 +386,7 @@ class _GameScreenState extends State<GameScreen>
     
     // 射击粒子效果
     for (int i = 0; i < 6; i++) {
-      particles.add(Particle(
+      particles.add(particlePool.obtain(
         x: player.x + random.nextDouble() * 20 - 10,
         y: player.y - 15,
         vx: random.nextDouble() * 4 - 2,
@@ -388,6 +401,19 @@ class _GameScreenState extends State<GameScreen>
     if (timeSlowCooldown > 0) timeSlowCooldown--;
     if (invincibleCooldown > 0) invincibleCooldown--;
     if (megaBlastCooldown > 0) megaBlastCooldown--;
+    if (shieldCooldown > 0) shieldCooldown--;
+    if (shieldActive && shieldDuration > 0) shieldDuration--;
+    if (shieldActive && shieldDuration <= 0) {
+      shieldActive = false;
+      shieldCooldown = 600;
+      shieldDuration = 300;
+    }
+
+    if (comboTimer > 0) {
+      comboTimer--;
+    } else {
+      comboCount = 0;
+    }
     
     if (timeSlowActive && timeSlowCooldown <= 0) {
       timeSlowActive = false;
@@ -444,6 +470,13 @@ class _GameScreenState extends State<GameScreen>
           HapticFeedback.heavyImpact();
         }
         break;
+      case 3: // 能量护盾
+        if (shieldCooldown <= 0) {
+          shieldActive = true;
+          shieldDuration = 300;
+          HapticFeedback.mediumImpact();
+        }
+        break;
     }
   }
 
@@ -465,7 +498,7 @@ class _GameScreenState extends State<GameScreen>
     }
     
     for (int i = 0; i < 60; i++) {
-      particles.add(Particle(
+      particles.add(particlePool.obtain(
         x: player.x,
         y: player.y,
         vx: random.nextDouble() * 25 - 12.5,
@@ -597,7 +630,11 @@ class _GameScreenState extends State<GameScreen>
       
       particles.removeWhere((particle) {
         particle.update();
-        return particle.isDead;
+        if (particle.isDead) {
+          particlePool.release(particle);
+          return true;
+        }
+        return false;
       });
       
       powerUps.removeWhere((powerUp) {
@@ -629,8 +666,13 @@ class _GameScreenState extends State<GameScreen>
 
   void updateBossAI() {
     if (boss == null) return;
-    
+
+    if (bossPhase == 0 && boss!.health < bossHealth * 0.6) bossPhase = 1;
+    if (bossPhase == 1 && boss!.health < bossHealth * 0.3) bossPhase = 2;
+
     double attackChance = timeSlowActive ? 0.02 : 0.08;
+    if (bossPhase == 1) attackChance *= 1.3;
+    if (bossPhase == 2) attackChance *= 1.6;
     
     switch (currentLevel) {
       case 1: // 吾尔克西江 - 闪电攻击
@@ -646,6 +688,14 @@ class _GameScreenState extends State<GameScreen>
             enemyBullets.add(EnemyBullet(
               x: boss!.x + (i - 2) * 20,
               y: boss!.y + 60,
+            ));
+          }
+        }
+        if (bossPhase >= 1 && random.nextDouble() < 0.05) {
+          for (int i = 0; i < 8; i++) {
+            enemyBullets.add(EnemyBullet(
+              x: random.nextDouble() * 400,
+              y: boss!.y + 80,
             ));
           }
         }
@@ -670,6 +720,14 @@ class _GameScreenState extends State<GameScreen>
             ));
           }
         }
+        if (bossPhase >= 2 && random.nextDouble() < 0.03) {
+          for (int i = 0; i < 12; i++) {
+            enemyBullets.add(EnemyBullet(
+              x: i * 30.0,
+              y: boss!.y + 100,
+            ));
+          }
+        }
         break;
         
       case 3: // 司马义江 - 终极攻击
@@ -691,6 +749,14 @@ class _GameScreenState extends State<GameScreen>
             ));
           }
         }
+        if (bossPhase >= 2 && random.nextDouble() < 0.05) {
+          for (int i = 0; i < 20; i++) {
+            enemyBullets.add(EnemyBullet(
+              x: random.nextDouble() * 400,
+              y: boss!.y + 80,
+            ));
+          }
+        }
         break;
     }
   }
@@ -702,7 +768,7 @@ class _GameScreenState extends State<GameScreen>
     explosions.add(Explosion(x: boss!.x, y: boss!.y, isLarge: true));
     
     for (int i = 0; i < 40; i++) {
-      particles.add(Particle(
+      particles.add(particlePool.obtain(
         x: boss!.x + random.nextDouble() * 100 - 50,
         y: boss!.y + random.nextDouble() * 80 - 40,
         vx: random.nextDouble() * 15 - 7.5,
@@ -799,7 +865,7 @@ class _GameScreenState extends State<GameScreen>
           triggerScreenShake(10);
           explosions.add(Explosion(x: enemies[j].x, y: enemies[j].y));
           for (int k = 0; k < 10; k++) {
-            particles.add(Particle(
+            particles.add(particlePool.obtain(
               x: enemies[j].x,
               y: enemies[j].y,
               vx: random.nextDouble() * 10 - 5,
@@ -808,7 +874,10 @@ class _GameScreenState extends State<GameScreen>
               life: 30,
             ));
           }
-          score += enemies[j].points;
+          comboCount++;
+          comboTimer = 90;
+          int points = (enemies[j].points * (1 + comboCount * 0.1)).round();
+          score += points;
           weaponUpgradePoints++;
           if (weaponUpgradePoints >= 8 && weaponLevel < 5) {
             weaponLevel++;
@@ -829,13 +898,16 @@ class _GameScreenState extends State<GameScreen>
           int damage = 10;
           if (bullets[i].type == 2) damage = 20;
           if (bullets[i].type == 3) damage = 30;
-          
+          if (random.nextDouble() < 0.1) {
+            damage *= 2;
+          }
+
           boss!.takeDamage(damage);
           SoundManager.playSound('boss_hit');
           triggerScreenShake(8);
           explosions.add(Explosion(x: bullets[i].x, y: bullets[i].y));
           for (int k = 0; k < 6; k++) {
-            particles.add(Particle(
+            particles.add(particlePool.obtain(
               x: bullets[i].x,
               y: bullets[i].y,
               vx: random.nextDouble() * 8 - 4,
@@ -844,6 +916,8 @@ class _GameScreenState extends State<GameScreen>
               life: 25,
             ));
           }
+          comboCount++;
+          comboTimer = 90;
           bullets.removeAt(i);
           break;
         }
@@ -854,7 +928,8 @@ class _GameScreenState extends State<GameScreen>
     if (!invincibleActive) {
       for (int i = enemyBullets.length - 1; i >= 0; i--) {
         if (enemyBullets[i].collidesWithPlayer(player)) {
-          playerHealth -= 10;
+          int damage = shieldActive ? 5 : 10;
+          playerHealth -= damage;
           triggerScreenShake(18);
           explosions.add(Explosion(x: player.x, y: player.y));
           enemyBullets.removeAt(i);
@@ -885,7 +960,7 @@ class _GameScreenState extends State<GameScreen>
             break;
         }
         for (int k = 0; k < 12; k++) {
-          particles.add(Particle(
+          particles.add(particlePool.obtain(
             x: powerUps[i].x,
             y: powerUps[i].y,
             vx: random.nextDouble() * 10 - 5,
@@ -1198,6 +1273,11 @@ class _GameScreenState extends State<GameScreen>
                       Text('⚔️ ${weaponNames[weaponLevel]}', style: TextStyle(color: Colors.orange, fontSize: 14, fontWeight: FontWeight.bold)),
                     ],
                   ),
+                  if (comboCount > 1)
+                    Padding(
+                      padding: EdgeInsets.only(top: 6),
+                      child: Text('🔥 连击 x$comboCount', style: TextStyle(color: Colors.yellow, fontSize: 14, fontWeight: FontWeight.bold)),
+                    ),
                   SizedBox(height: 12),
                   Row(
                     children: [
@@ -1284,6 +1364,7 @@ class _GameScreenState extends State<GameScreen>
           _buildSkillButton('⏰', '时间减慢', timeSlowCooldown <= 0, () => useSkill(0)),
           _buildSkillButton('🛡️', '无敌冲刺', invincibleCooldown <= 0, () => useSkill(1)),
           _buildSkillButton('💥', '清屏大招', megaBlastCooldown <= 0, () => useSkill(2)),
+          _buildSkillButton('🔰', '能量护盾', shieldCooldown <= 0, () => useSkill(3)),
         ],
       ),
     );
@@ -1516,6 +1597,38 @@ class Particle {
     vy += 0.12;
     life--;
     if (life <= 0) isDead = true;
+  }
+}
+
+class ParticlePool {
+  final List<Particle> _pool = [];
+
+  Particle obtain({
+    required double x,
+    required double y,
+    required double vx,
+    required double vy,
+    required Color color,
+    required int life,
+  }) {
+    if (_pool.isNotEmpty) {
+      final p = _pool.removeLast();
+      p
+        ..x = x
+        ..y = y
+        ..vx = vx
+        ..vy = vy
+        ..color = color
+        ..life = life
+        ..maxLife = life
+        ..isDead = false;
+      return p;
+    }
+    return Particle(x: x, y: y, vx: vx, vy: vy, color: color, life: life);
+  }
+
+  void release(Particle p) {
+    _pool.add(p);
   }
 }
 
